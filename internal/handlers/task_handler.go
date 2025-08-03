@@ -111,6 +111,17 @@ func (h *TaskHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, http.StatusOK, status)
 }
 
+// GetStatus возвращает статус задачи
+func (h *TaskHandler) GetActiveTasks(w http.ResponseWriter, r *http.Request) {
+	tasks, err := h.service.GetActiveTasks()
+	if err != nil {
+		h.logger.Error("Ошибка получения активных задач", "error", err)
+		respondWithError(w, http.StatusInternalServerError, "Ошибка получения активных задач")
+		return
+	}
+	respondWithJSON(w, http.StatusOK, tasks)
+}
+
 // respondWithJSON отправляет JSON-ответ
 func respondWithJSON(w http.ResponseWriter, status int, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")

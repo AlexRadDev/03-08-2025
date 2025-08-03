@@ -140,15 +140,23 @@ func (s *TaskService) GetStatus(taskID int64) (map[string]string, error) {
 	}
 
 	if urlCount >= 3 {
-
 		var files []string
 
 		s.urlsMu.RLock()
 
-		for _, u := range s.urlsByTask[taskID] {
+		for i, u := range s.urlsByTask[taskID] {
 			filePath, err := s.downloadFile(u, taskID)
 			if err != nil {
 				s.logger.Warn("Ошибка скачивания файла при создании архива", "url", u, "error", err)
+				switch i {
+				case 0:
+					result["warn_01"] = fmt.Sprintf("Ошибка скачивания файла #%v: %v", i+1, err)
+				case 1:
+					result["warn_02"] = fmt.Sprintf("Ошибка скачивания файла #%v: %v", i+1, err)
+				case 2:
+					result["warn_03"] = fmt.Sprintf("Ошибка скачивания файла #%v: %v", i+1, err)
+				}
+
 				continue
 			}
 			files = append(files, filePath)
@@ -186,6 +194,7 @@ func (s *TaskService) GetStatus(taskID int64) (map[string]string, error) {
 		if err := s.repo.SaveTask(task); err != nil {
 			s.logger.Error("Ошибка обновления задачи", "task_id", taskID, "error", err)
 		}
+
 		result["status"] = "завершена"
 		result["archive_url"] = fmt.Sprintf("http://localhost:%d/%s", s.cfg.ServerPort, task.ArchivePath)
 	}
@@ -208,6 +217,25 @@ func deleteFiles(files []string) error {
 	return nil
 }
 
+// GetActiveTasks возвращает активные задачи и их ссылки
+func (s *TaskService) GetActiveTasks() ([]map[string]interface{}, error) {
+	s.urlsMu.RLock()
+	defer s.urlsMu.RUnlock()
+
+	var activeTasks []map[string]interface{}
+	for id, task := range s.repo.Tasks {
+		if task.Status == "создали" || task.Status == "в процессе" {
+			taskInfo := map[string]interface{}{
+				"task_id": id,
+				"status":  task.Status,
+				"urls":    s.urlsByTask[id],
+			}
+			activeTasks = append(activeTasks, taskInfo)
+		}
+	}
+	return activeTasks, nil
+}
+
 // downloadFile скачивает файл по URL
 func (s *TaskService) downloadFile(url string, taskID int64) (string, error) {
 	ext := strings.ToLower(filepath.Ext(url))
@@ -219,6 +247,7 @@ func (s *TaskService) downloadFile(url string, taskID int64) (string, error) {
 		}
 	}
 
+	// HEAD-запрос, если тип файла не указан в ссылке
 	if !isAllowed {
 		start := time.Now()
 		req, err := http.NewRequest(http.MethodHead, url, nil)
@@ -234,7 +263,8 @@ func (s *TaskService) downloadFile(url string, taskID int64) (string, error) {
 		defer resp.Body.Close()
 
 		s.logger.Info("HEAD-запрос выполнен", "url", url, "duration", time.Since(start))
-		contentType := resp.Header.Get("Content-Type")
+
+		contentType := resp.Header.Get("Content-Type") // проверяем тип файла
 		for _, allowed := range s.cfg.FileAllowedExtensions {
 			if strings.Contains(contentType, allowed) {
 				isAllowed = true
@@ -245,7 +275,7 @@ func (s *TaskService) downloadFile(url string, taskID int64) (string, error) {
 	}
 
 	if !isAllowed {
-		return "", ErrInvalidFile
+		return "", ErrInvalidFile // недопустимый тип файла
 	}
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
@@ -263,15 +293,15 @@ func (s *TaskService) downloadFile(url string, taskID int64) (string, error) {
 		return "", ErrFileTooLarge
 	}
 
-	preffileName := ""
-
+	// просто удобная неймин-нумерация (необязательно)
+	prefFileName := ""
 	if taskID < 10 {
-		preffileName = "Task_" + "0" + strconv.FormatInt(taskID, 10) + "_" + strconv.FormatInt(atomic.AddInt64(&s.filesCounter, 1), 10)
+		prefFileName = "Task_" + "0" + strconv.FormatInt(taskID, 10) + "_" + strconv.FormatInt(atomic.AddInt64(&s.filesCounter, 1), 10)
 	} else {
-		preffileName = "Task_" + strconv.Itoa(int(taskID)) + "_" + strconv.FormatInt(atomic.AddInt64(&s.filesCounter, 1), 10)
+		prefFileName = "Task_" + strconv.Itoa(int(taskID)) + "_" + strconv.FormatInt(atomic.AddInt64(&s.filesCounter, 1), 10)
 	}
 
-	fileName := fmt.Sprintf("%s/%s%s", folderPathImg, preffileName, ext)
+	fileName := fmt.Sprintf("%s/%s%s", folderPathImg, prefFileName, ext)
 	if err := os.MkdirAll(folderPathImg, 0755); err != nil {
 		return "", err
 	}
@@ -326,6 +356,7 @@ func (s *TaskService) createZipArchive(taskID int64, files []string) (string, er
 		}
 	}
 
+	// просто удобная неймин-нумерация (необязательно)
 	zipName := ""
 	if taskID < 10 {
 		zipName = "Task_" + "0" + strconv.FormatInt(taskID, 10)
