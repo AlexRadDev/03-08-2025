@@ -17,7 +17,7 @@ const (
 )
 
 func main() {
-	// Инициализация структурированного логгера
+	// Инициализация структурированного логера
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	// Загрузка конфигурации
@@ -36,6 +36,7 @@ func main() {
 	// Инициализация ручек
 	taskHandler := handlers.NewTaskHandler(taskService, logger)
 
+	// Инициализация роутера
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /tasks", taskHandler.CreateTask)
 	mux.HandleFunc("POST /tasks/{id}/links", taskHandler.AddLinks)
